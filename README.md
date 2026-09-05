@@ -1,9 +1,11 @@
 # esp32-s3_flashforge-monitor
-ESP32-S3 Web Monitor for Flashforge Adventurer 5M/5X with Flashforge Camera inside.
-Hardware required (ESP32-S3) (this is what I'm using - https://www.aliexpress.com/item/1005006418608267.html)
+
+Based on the fantastic work of Jim Wood (https://www.amazon.co.uk/dp/B0CJJHXD1W?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_4&th=1), who posted this on FB: https://www.facebook.com/groups/zmodgroup/permalink/3285817034937571/.
+
+ESP32-S3 Web Monitor for Flashforge Adventurer 5M/5X with Camera from the ESP32 Wromer board.
+
+Hardware required (ESP32-Wromer board) (this is what I'm using - (https://www.amazon.co.uk/dp/B0CJJHXD1W?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_4&th=1)
 
 Required libraries (WebServer, ArduinoJson, Preferences).
 
-You only need to fill in their 2.4 GHz Wi-Fi credentials before uploading.
-
-<img width="547" height="993" alt="image" src="https://github.com/user-attachments/assets/619f8fb7-6d2c-4266-9c8e-d37c20d5b8d1" />
+You only need to fill in your 2.4 GHz Wi-Fi credentials before uploading.
