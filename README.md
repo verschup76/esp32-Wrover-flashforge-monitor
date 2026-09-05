@@ -1,11 +1,23 @@
-# esp32-s3_flashforge-monitor
+# ESP32 WROVER Flashforge Monitor
 
-Based on the fantastic work of Jim Wood (https://www.amazon.co.uk/dp/B0CJJHXD1W?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_4&th=1), who posted this on FB: https://www.facebook.com/groups/zmodgroup/permalink/3285817034937571/.
+ESP32 web monitor for the Flashforge Adventurer 5M/5X with camera support.
 
-ESP32-S3 Web Monitor for Flashforge Adventurer 5M/5X with Camera from the ESP32 Wromer board.
+The current combined camera + Flashforge monitor project is in [`FlashforgeCamera/`](FlashforgeCamera/). It is prepared for the classic ESP32-WROVER camera layout, not an ESP32-S3.
 
-Hardware required (ESP32-Wromer board) (this is what I'm using - (https://www.amazon.co.uk/dp/B0CJJHXD1W?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_4&th=1)
+Hardware reference: ESP32-WROVER camera board.
 
-Required libraries (WebServer, ArduinoJson, Preferences).
+Required Arduino libraries:
 
-You only need to fill in your 2.4 GHz Wi-Fi credentials before uploading.
+- WebServer
+- ArduinoJson
+- Preferences
+
+The project uses a separate local `secrets.h` file for Wi-Fi credentials. Copy `FlashforgeCamera/secrets-example.h` to `FlashforgeCamera/secrets.h` and fill in the 2.4 GHz Wi-Fi credentials before compiling. `secrets.h` is excluded from Git.
+
+Runtime URLs after upload:
+
+- Camera control and snapshots: `http://<board-ip>/`
+- MJPEG stream: `http://<board-ip>:81/stream`
+- Flashforge monitor dashboard: `http://<board-ip>:8081/`
+
+<img width="547" height="993" alt="image" src="https://github.com/user-attachments/assets/619f8fb7-6d2c-4266-9c8e-d37c20d5b8d1" />

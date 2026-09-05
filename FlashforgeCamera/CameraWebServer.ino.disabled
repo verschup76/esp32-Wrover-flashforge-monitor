@@ -1,0 +1,294 @@
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "esp_camera.h"
+#include <WiFi.h>
+#include "FS.h"
+#include "SD_MMC.h"
+#include <WebServer.h>
+
+// ===========================
+// Select camera model in board_config.h
+// ===========================
+#include "board_config.h"
+
+// ===========================
+// Enter your WiFi credentials
+// ===========================
+const char *ssid = "topgun";
+const char *password = "Jg9Qipqd6rUR";
+
+void startCameraServer();
+void setupLedFlash();
+
+// ---------------------------
+// Rolling archive settings
+// ---------------------------
+const int MAX_FILES = 2880;                    // 24h at 1 image / 30 sec
+int imageIndex = 0;
+unsigned long lastCapture = 0;
+const unsigned long captureInterval = 30000;  // 30 seconds
+
+// ---------------------------
+// SD card file browser
+// ---------------------------
+WebServer fileServer(82);
+
+// ---------------------------
+// Save one image to SD
+// ---------------------------
+void saveImageToSD() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  char filename[20];
+  snprintf(filename, sizeof(filename), "/img%04d.jpg", imageIndex);
+
+  // Remove old file first so FILE_WRITE does not append
+  if (SD_MMC.exists(filename)) {
+    SD_MMC.remove(filename);
+  }
+
+  File file = SD_MMC.open(filename, FILE_WRITE);
+  if (!file) {
+    Serial.printf("Failed to open %s for writing\n", filename);
+  } else {
+    file.write(fb->buf, fb->len);
+    file.close();
+    Serial.printf("Saved %s (%u bytes)\n", filename, fb->len);
+  }
+
+  // Update latest.jpg
+  if (SD_MMC.exists("/latest.jpg")) {
+    SD_MMC.remove("/latest.jpg");
+  }
+
+  File latest = SD_MMC.open("/latest.jpg", FILE_WRITE);
+  if (!latest) {
+    Serial.println("Failed to open /latest.jpg for writing");
+  } else {
+    latest.write(fb->buf, fb->len);
+    latest.close();
+    Serial.println("Updated /latest.jpg");
+  }
+
+  esp_camera_fb_return(fb);
+
+  imageIndex++;
+  if (imageIndex >= MAX_FILES) {
+    imageIndex = 0;
+  }
+}
+
+// ---------------------------
+// File browser handlers
+// ---------------------------
+void handleFileList() {
+  File root = SD_MMC.open("/");
+  if (!root || !root.isDirectory()) {
+    fileServer.send(500, "text/plain", "Failed to open SD card root");
+    return;
+  }
+
+  String html;
+  html.reserve(32768);
+  html += "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>ESP32 Skycam Files</title></head><body>";
+  html += "<h1>ESP32 Skycam Files</h1>";
+  html += "<p><a href='/latest'>View latest.jpg</a></p>";
+  html += "<ul>";
+
+  File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      String name = String(file.name());
+      size_t size = file.size();
+
+      html += "<li><a href='/file?name=" + name + "'>" + name + "</a> (" + String(size) + " bytes)</li>";
+    }
+    file = root.openNextFile();
+  }
+
+  html += "</ul></body></html>";
+  fileServer.send(200, "text/html", html);
+}
+
+void handleFileDownload() {
+  if (!fileServer.hasArg("name")) {
+    fileServer.send(400, "text/plain", "Missing file name");
+    return;
+  }
+
+  String path = fileServer.arg("name");
+  if (!path.startsWith("/")) {
+    path = "/" + path;
+  }
+
+  File file = SD_MMC.open(path);
+  if (!file || file.isDirectory()) {
+    fileServer.send(404, "text/plain", "File not found");
+    return;
+  }
+
+  fileServer.streamFile(file, "image/jpeg");
+  file.close();
+}
+
+void handleLatest() {
+  File file = SD_MMC.open("/latest.jpg");
+  if (!file || file.isDirectory()) {
+    fileServer.send(404, "text/plain", "latest.jpg not found");
+    return;
+  }
+
+  fileServer.streamFile(file, "image/jpeg");
+  file.close();
+}
+
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.frame_size = FRAMESIZE_VGA;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.jpeg_quality = 12;
+  config.fb_count = 1;
+
+  if (config.pixel_format == PIXFORMAT_JPEG) {
+    if (psramFound()) {
+      config.jpeg_quality = 10;
+      config.fb_count = 2;
+      config.grab_mode = CAMERA_GRAB_LATEST;
+    } else {
+      config.frame_size = FRAMESIZE_VGA;
+      config.fb_location = CAMERA_FB_IN_DRAM;
+    }
+  } else {
+    config.frame_size = FRAMESIZE_240X240;
+#if CONFIG_IDF_TARGET_ESP32S3
+    config.fb_count = 2;
+#endif
+  }
+
+#if defined(CAMERA_MODEL_ESP_EYE)
+  pinMode(13, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
+#endif
+
+  Serial.println("Starting camera init...");
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x\n", err);
+    return;
+  }
+  Serial.println("Camera init success");
+
+  sensor_t *s = esp_camera_sensor_get();
+
+  if (s->id.PID == OV3660_PID) {
+    s->set_vflip(s, 1);
+    s->set_brightness(s, 1);
+    s->set_saturation(s, -2);
+  }
+
+  if (config.pixel_format == PIXFORMAT_JPEG) {
+    s->set_framesize(s, FRAMESIZE_VGA);
+  }
+
+#if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
+  s->set_vflip(s, 1);
+  s->set_hmirror(s, 1);
+#endif
+
+#if defined(CAMERA_MODEL_ESP32S3_EYE)
+  s->set_vflip(s, 1);
+#endif
+
+#if defined(LED_GPIO_NUM)
+  setupLedFlash();
+#endif
+
+  // Mount SD card in 1-bit mode
+  if (!SD_MMC.begin("/sdcard", true)) {
+    Serial.println("SD card mount failed");
+  } else {
+    Serial.println("SD card mounted");
+    uint8_t cardType = SD_MMC.cardType();
+    if (cardType == CARD_NONE) {
+      Serial.println("No SD card attached");
+    } else {
+      Serial.print("SD card size: ");
+      Serial.print(SD_MMC.cardSize() / (1024 * 1024));
+      Serial.println(" MB");
+    }
+  }
+
+  WiFi.begin(ssid, password);
+  WiFi.setSleep(false);
+
+  Serial.print("WiFi connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("WiFi connected");
+
+  // Built-in camera server
+  startCameraServer();
+
+  // SD file browser
+  fileServer.on("/", handleFileList);
+  fileServer.on("/file", handleFileDownload);
+  fileServer.on("/latest", handleLatest);
+  fileServer.begin();
+
+  Serial.println("File server started on port 82");
+  Serial.print("Browse files at: http://");
+  Serial.print(WiFi.localIP());
+  Serial.println(":82/");
+
+  Serial.print("Camera Ready! Use 'http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("' to connect");
+}
+
+void loop() {
+  fileServer.handleClient();
+
+  if (SD_MMC.cardType() != CARD_NONE) {
+    if (millis() - lastCapture >= captureInterval) {
+      lastCapture = millis();
+      saveImageToSD();
+    }
+  }
+
+  delay(10);
+}
